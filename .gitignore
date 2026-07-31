@@ -1,0 +1,46 @@
+# ---- credentials: never commit ----
+.env
+.env.local
+.env.*.local
+*.tfvars
+!*.tfvars.example
+credentials.json
+*.pem
+*.key
+
+# ---- terraform ----
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.*
+crash.log
+override.tf
+override.tf.json
+
+# ---- python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# ---- node / next ----
+node_modules/
+.next/
+out/
+.vercel/
+next-env.d.ts
+
+# ---- build artifacts ----
+dist/
+build/
+*.zip
+!lambda/dist/*.zip
+
+# ---- local data (never commit generated events) ----
+data/
+*.parquet
+*.jsonl.gz
+
+# ---- os ----
+.DS_Store
