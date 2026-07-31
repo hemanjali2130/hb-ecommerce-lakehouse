@@ -129,8 +129,8 @@ locals {
     "--job-language"                     = "python"
     "--enable-metrics"                   = "true"
     "--enable-continuous-cloudwatch-log" = "true"
-    "--DATA_BUCKET"   = aws_s3_bucket.data.id
-    "--GLUE_DATABASE" = local.glue_database
+    "--DATA_BUCKET"                      = aws_s3_bucket.data.id
+    "--GLUE_DATABASE"                    = local.glue_database
 
     # Makes the Glue Data Catalog Spark's metastore, so each job can register the
     # partitions it just wrote via MSCK REPAIR TABLE.

@@ -192,6 +192,17 @@ data "aws_iam_policy_document" "glue_job" {
       "${aws_s3_bucket.data.arn}/${local.prefix_silver}/*",
       "${aws_s3_bucket.data.arn}/${local.prefix_gold}/*",
       "${aws_s3_bucket.data.arn}/${local.prefix_bench}/*",
+
+      # EMRFS directory markers. Glue's S3 filesystem writes a zero-byte
+      # "<prefix>_$folder$" object as a SIBLING of the prefix, not inside it — so
+      # `silver/*` does not match `silver_$folder$`. On the first run this is
+      # invisible (nothing to delete into an empty prefix); on every subsequent
+      # `mode("overwrite")` the job tries to delete the marker and fails with
+      # AccessDenied. Scoped to the three curated prefixes rather than granted
+      # bucket-wide.
+      "${aws_s3_bucket.data.arn}/${local.prefix_silver}_$folder$",
+      "${aws_s3_bucket.data.arn}/${local.prefix_gold}_$folder$",
+      "${aws_s3_bucket.data.arn}/${local.prefix_bench}_$folder$",
     ]
   }
 
@@ -201,10 +212,14 @@ data "aws_iam_policy_document" "glue_job" {
     resources = [aws_s3_bucket.data.arn]
   }
 
+  # ListBucket is required as well as GetObject: Glue's script loader lists the
+  # bucket before downloading, and without it the job never starts —
+  #   "LAUNCH ERROR | Error downloading from S3 ... not authorized to perform:
+  #    s3:ListBucket on arn:aws:s3:::hb-ecom-lakehouse-904233-artifacts"
   statement {
     sid       = "ReadJobScripts"
-    actions   = ["s3:GetObject"]
-    resources = ["${aws_s3_bucket.artifacts.arn}/*"]
+    actions   = ["s3:GetObject", "s3:ListBucket", "s3:GetBucketLocation"]
+    resources = [aws_s3_bucket.artifacts.arn, "${aws_s3_bucket.artifacts.arn}/*"]
   }
 
   # Catalog access scoped to this project's database and its tables only.
@@ -220,6 +235,15 @@ data "aws_iam_policy_document" "glue_job" {
       "arn:aws:glue:${local.region}:${local.account_id}:catalog",
       "arn:aws:glue:${local.region}:${local.account_id}:database/${local.glue_database}",
       "arn:aws:glue:${local.region}:${local.account_id}:table/${local.glue_database}/*",
+
+      # Spark's Hive metastore client probes the `default` database when the
+      # session initialises, whichever database the job actually uses. Without
+      # this, MSCK REPAIR TABLE fails with:
+      #   "Unable to verify existence of default database: ... not authorized
+      #    to perform: glue:GetDatabase on .../database/default"
+      # and partitions silently go unregistered — Athena then returns zero rows
+      # from a prefix that visibly contains data.
+      "arn:aws:glue:${local.region}:${local.account_id}:database/default",
     ]
   }
 

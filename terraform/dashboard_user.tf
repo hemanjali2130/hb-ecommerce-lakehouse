@@ -57,11 +57,23 @@ data "aws_iam_policy_document" "dashboard_reader" {
     ]
   }
 
-  # Athena needs ListBucket to resolve table locations. Condition-scoped so it
-  # cannot enumerate bronze/silver/quarantine object keys.
+  # GetBucketLocation must be UNCONDITIONAL. Athena calls it with no prefix while
+  # verifying the query-results location, so folding it into the prefix-scoped
+  # statement below makes every query fail with:
+  #   "Unable to verify/create output bucket ..."
+  # It leaks nothing — the answer is just the bucket's region.
+  statement {
+    sid       = "ResolveBucketRegions"
+    actions   = ["s3:GetBucketLocation"]
+    resources = [aws_s3_bucket.data.arn, aws_s3_bucket.results.arn]
+  }
+
+  # ListBucket on the data bucket stays prefix-scoped, so the dashboard can
+  # resolve gold/ and bench/ table locations but cannot enumerate bronze,
+  # silver or quarantine object keys.
   statement {
     sid       = "ListCuratedPrefixesOnly"
-    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
+    actions   = ["s3:ListBucket"]
     resources = [aws_s3_bucket.data.arn]
     condition {
       test     = "StringLike"
@@ -77,15 +89,13 @@ data "aws_iam_policy_document" "dashboard_reader" {
     resources = ["${aws_s3_bucket.results.arn}/dashboard/*"]
   }
 
+  # Unconditional on the results bucket: Athena lists it during output-location
+  # verification without supplying a prefix. The bucket holds nothing but this
+  # dashboard's own query results, and a 3-day lifecycle rule expires those.
   statement {
     sid       = "ListResultsBucket"
-    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
+    actions   = ["s3:ListBucket"]
     resources = [aws_s3_bucket.results.arn]
-    condition {
-      test     = "StringLike"
-      variable = "s3:prefix"
-      values   = ["dashboard/*", "dashboard/"]
-    }
   }
 
   # --- Step Functions: read-only, for the "last pipeline run" panel ---
