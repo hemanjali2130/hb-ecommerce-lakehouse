@@ -129,8 +129,21 @@ locals {
     "--job-language"                     = "python"
     "--enable-metrics"                   = "true"
     "--enable-continuous-cloudwatch-log" = "true"
-    "--DATA_BUCKET"                      = aws_s3_bucket.data.id
-    "--GLUE_DATABASE"                    = local.glue_database
+    "--DATA_BUCKET"   = aws_s3_bucket.data.id
+    "--GLUE_DATABASE" = local.glue_database
+
+    # Makes the Glue Data Catalog Spark's metastore, so each job can register the
+    # partitions it just wrote via MSCK REPAIR TABLE.
+    #
+    # Explicit Glue tables do NOT auto-discover partitions: Spark writes
+    # event_date=YYYY-MM-DD/ directories, but until those are registered the
+    # catalog reports zero partitions and Athena returns zero rows against a
+    # bucket that visibly contains data.
+    #
+    # Registering from inside the writing job (rather than from a Step Functions
+    # Athena task) keeps hb-stepfunctions-role with no S3 and no Athena access at
+    # all, and puts partition registration next to the write that created it.
+    "--enable-glue-datacatalog" = "true"
     # Bookmarks are unavailable on Flex jobs, and the pipeline is a full
     # overwrite of silver/gold each run, so there is nothing to bookmark.
     "--job-bookmark-option" = "job-bookmark-disable"
@@ -186,6 +199,7 @@ resource "aws_glue_job" "gold" {
   default_arguments = merge(local.common_job_args, {
     "--SOURCE_PREFIX"         = local.prefix_silver
     "--TARGET_PREFIX"         = local.prefix_gold
+    "--QUARANTINE_PREFIX"     = local.prefix_quarantine
     "--EMIT_FRESHNESS_METRIC" = tostring(var.enable_freshness_metric)
     "--METRIC_NAMESPACE"      = "hb/lakehouse"
   })
@@ -394,6 +408,63 @@ resource "aws_glue_catalog_table" "dim_date" {
         name = columns.value.name
         type = columns.value.type
       }
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Quarantine summary — counts only, no payloads.
+#
+# This table exists so the dashboard can show "quarantine broken down by
+# rejection reason" WITHOUT hb-dashboard-reader ever being granted read access
+# to the quarantine prefix itself. Those objects hold raw rejected payloads,
+# which by definition failed validation and may contain malformed or
+# unvalidated customer identifiers; a public web dashboard has no business
+# reading them. The gold job aggregates inside the trusted pipeline and
+# publishes only counts here, under gold/ where the reader already has access.
+# ---------------------------------------------------------------------------
+
+resource "aws_glue_catalog_table" "quarantine_summary" {
+  name          = "quarantine_summary"
+  database_name = aws_glue_catalog_database.lakehouse.name
+  table_type    = "EXTERNAL_TABLE"
+
+  parameters = {
+    classification        = "parquet"
+    "parquet.compression" = "SNAPPY"
+    EXTERNAL              = "TRUE"
+  }
+
+  storage_descriptor {
+    location      = "s3://${aws_s3_bucket.data.id}/${local.prefix_gold}/quarantine_summary/"
+    input_format  = local.parquet_input
+    output_format = local.parquet_output
+    compressed    = true
+
+    ser_de_info {
+      serialization_library = local.parquet_serde
+      parameters            = { "serialization.format" = "1" }
+    }
+
+    columns {
+      name = "reject_reason"
+      type = "string"
+    }
+    columns {
+      name = "ingest_date"
+      type = "string"
+    }
+    columns {
+      name = "reject_count"
+      type = "bigint"
+    }
+    columns {
+      name = "last_seen_at"
+      type = "string"
+    }
+    columns {
+      name = "sample_detail"
+      type = "string"
     }
   }
 }

@@ -29,9 +29,12 @@ resource "aws_cloudwatch_metric_alarm" "lambda_error_rate" {
   evaluation_periods  = 2
   treat_missing_data  = "notBreaching" # No invocations is normal — the generator is off by default.
 
+  # CloudWatch metric math cannot mix a time series and a scalar inside MAX(),
+  # so guarding the divide-by-zero with MAX([invocations, 1]) is rejected at
+  # PutMetricAlarm time. IF() is the supported form.
   metric_query {
     id          = "error_rate"
-    expression  = "100 * errors / MAX([invocations, 1])"
+    expression  = "IF(invocations > 0, 100 * errors / invocations, 0)"
     label       = "Error rate (%)"
     return_data = true
   }

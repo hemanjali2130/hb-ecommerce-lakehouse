@@ -171,11 +171,15 @@ resource "aws_iam_role" "glue_job" {
 
 data "aws_iam_policy_document" "glue_job" {
   statement {
-    sid     = "ReadBronzeAndSilver"
+    sid     = "ReadBronzeSilverAndQuarantine"
     actions = ["s3:GetObject", "s3:GetObjectVersion"]
     resources = [
       "${aws_s3_bucket.data.arn}/${local.prefix_bronze}/*",
       "${aws_s3_bucket.data.arn}/${local.prefix_silver}/*",
+      # READ ONLY. The gold job aggregates quarantine into a counts-only summary
+      # so the dashboard never needs access to raw rejected payloads. Glue still
+      # cannot WRITE to quarantine - it remains an append-only audit trail.
+      "${aws_s3_bucket.data.arn}/${local.prefix_quarantine}/*",
     ]
   }
 

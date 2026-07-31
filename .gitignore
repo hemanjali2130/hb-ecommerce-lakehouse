@@ -44,3 +44,7 @@ data/
 
 # ---- os ----
 .DS_Store
+
+# build info / deploy scratch
+dashboard/tsconfig.tsbuildinfo
+iam/.*.deploy.json

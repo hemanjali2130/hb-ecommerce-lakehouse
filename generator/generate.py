@@ -262,54 +262,109 @@ def run_stream(stream_name, rate, duration, region, profile):
 # ---------------------------------------------------------------------------
 
 def run_bulk(bucket, prefix, target_gb, region, profile, dry_run=False):
+    """
+    Write the benchmark corpus straight to S3, applying the SAME validation the
+    Firehose transform applies.
+
+    Bulk mode skips Firehose, but it must not skip validation. If it did, the
+    ~2% malformed records would land in bronze unvalidated and the silver job
+    would drop them silently when their timestamps failed to cast — breaking the
+    project's central "never silently drop" guarantee on the very path that
+    produces most of the data. So this reuses lambda/validator/rules.py: valid
+    records go to bronze, rejects go to the same reason-partitioned quarantine
+    prefix the Lambda writes to.
+    """
     import boto3
+
+    from collections import defaultdict
+
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lambda", "validator"))
+    from rules import Rejection, validate  # noqa: E402
 
     session = boto3.Session(profile_name=profile, region_name=region)
     s3 = session.client("s3")
 
     target_bytes = int(target_gb * 1e9)
-    # ~24 MB gzipped objects: big enough that Athena is not paying per-file
-    # overhead, small enough to stream without buffering gigabytes in memory.
     rows_per_object = 60_000
 
     print(f"[bulk] target {target_gb} GB -> s3://{bucket}/{prefix}/")
+    print("[bulk] applying the same schema validation as the Firehose transform")
     if dry_run:
         print("[bulk] DRY RUN - nothing will be written")
 
     written_bytes = 0
     obj_index = 0
+    valid_total = 0
+    reject_total = 0
+    reject_counts = defaultdict(int)
     started = time.time()
     ingest_date = _now().date().isoformat()
 
     while written_bytes < target_bytes:
+        valid_lines = []
+        rejects_by_reason = defaultdict(list)
+
+        for raw_record in emit_batch(rows_per_object):
+            try:
+                parsed = json.loads(raw_record)
+                validated = validate(parsed)
+            except json.JSONDecodeError as exc:
+                rejects_by_reason["invalid_json"].append(
+                    {"reject_reason": "invalid_json", "reject_detail": str(exc)[:200],
+                     "rejected_at": _now().isoformat(), "raw_payload": raw_record[:2000]}
+                )
+                continue
+            except Rejection as exc:
+                rejects_by_reason[exc.reason].append(
+                    {"reject_reason": exc.reason, "reject_detail": exc.detail,
+                     "rejected_at": _now().isoformat(), "raw_payload": raw_record[:2000]}
+                )
+                continue
+            valid_lines.append(json.dumps(validated, separators=(",", ":")))
+
+        valid_total += len(valid_lines)
+
+        # --- bronze ---
+        chunk = ("\n".join(valid_lines) + "\n").encode("utf-8")
         buf = io.BytesIO()
         with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
-            chunk = "\n".join(emit_batch(rows_per_object)) + "\n"
-            raw = chunk.encode("utf-8")
-            gz.write(raw)
+            gz.write(chunk)
 
-        body = buf.getvalue()
         # Count UNCOMPRESSED bytes toward the target: the benchmark cares about
         # logical corpus size, and bench_raw_json is written uncompressed.
-        written_bytes += len(raw)
+        written_bytes += len(chunk)
         key = f"{prefix}/ingest_date={ingest_date}/bulk-{obj_index:05d}.jsonl.gz"
-
         if not dry_run:
-            s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/x-ndjson")
+            s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue(),
+                          ContentType="application/x-ndjson", ContentEncoding="gzip")
+
+        # --- quarantine, one object per reason per batch ---
+        for reason, rows in rejects_by_reason.items():
+            reject_counts[reason] += len(rows)
+            reject_total += len(rows)
+            qbuf = io.BytesIO()
+            with gzip.GzipFile(fileobj=qbuf, mode="wb") as gz:
+                gz.write(("\n".join(json.dumps(r, separators=(",", ":")) for r in rows) + "\n").encode("utf-8"))
+            qkey = (f"quarantine/reject_reason={reason}/ingest_date={ingest_date}/"
+                    f"bulk-{obj_index:05d}.jsonl.gz")
+            if not dry_run:
+                s3.put_object(Bucket=bucket, Key=qkey, Body=qbuf.getvalue(),
+                              ContentType="application/x-ndjson", ContentEncoding="gzip")
 
         obj_index += 1
         pct = 100 * written_bytes / target_bytes
-        print(
-            f"\r[bulk] {obj_index} objects, {written_bytes / 1e9:.3f}/{target_gb} GB ({pct:.0f}%)",
-            end="",
-            flush=True,
-        )
+        print(f"\r[bulk] {obj_index} objects | {written_bytes / 1e9:.3f}/{target_gb} GB ({pct:.0f}%) "
+              f"| valid={valid_total} quarantined={reject_total}", end="", flush=True)
 
     elapsed = time.time() - started
-    print(f"\n[bulk] done. {obj_index} objects, {written_bytes / 1e9:.3f} GB in {elapsed:.0f}s")
-    print(f"[bulk] S3 storage cost: ~${written_bytes / 1e9 * 0.023:.4f}/month (compressed on disk)")
-    print("[bulk] Firehose cost avoided by using bulk mode: "
-          f"~${written_bytes / 1e9 * 0.08:.4f}")
+    print(f"\n[bulk] done in {elapsed:.0f}s")
+    print(f"[bulk] bronze   : {valid_total} valid rows, {written_bytes / 1e9:.3f} GB uncompressed")
+    print(f"[bulk] quarantine: {reject_total} rows "
+          f"({100 * reject_total / max(1, valid_total + reject_total):.2f}% of generated)")
+    for reason, n in sorted(reject_counts.items(), key=lambda x: -x[1]):
+        print(f"           {reason:32} {n}")
+    print(f"[bulk] S3 storage: ~${written_bytes / 1e9 * 0.023:.4f}/month")
+    print(f"[bulk] Firehose ingest cost avoided: ~${written_bytes / 1e9 * 0.08:.4f}")
 
 
 def main():

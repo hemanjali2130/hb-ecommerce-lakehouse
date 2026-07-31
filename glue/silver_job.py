@@ -172,4 +172,22 @@ partition_count = max(1, min(20, total_out // 200_000 + 1))
 
 print(f"[silver] wrote {total_out} rows to {TARGET} in {partition_count} file(s) per partition")
 
+# ---------------------------------------------------------------------------
+# Register the partitions just written.
+#
+# The Glue tables are declared explicitly in Terraform (no crawler), so nothing
+# discovers new event_date=... directories on its own. Without this, Athena
+# queries a table whose S3 location is full of data and returns zero rows.
+# ---------------------------------------------------------------------------
+def repair(table):
+    try:
+        spark.sql(f"MSCK REPAIR TABLE `{args['GLUE_DATABASE']}`.`{table}`")
+        n = spark.sql(f"SHOW PARTITIONS `{args['GLUE_DATABASE']}`.`{table}`").count()
+        print(f"[partitions] {table}: {n} registered")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[partitions][WARN] {table}: {exc}")
+
+repair("silver_events")
+
+
 job.commit()

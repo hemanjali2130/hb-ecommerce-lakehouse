@@ -132,6 +132,24 @@ print(f"[bench] writing parquet_part ({distinct_dates} date partitions, snappy)"
     .parquet(f"{TARGET}/parquet_part/")
 )
 
+
+# ---------------------------------------------------------------------------
+# Register the partitions just written.
+#
+# The Glue tables are declared explicitly in Terraform (no crawler), so nothing
+# discovers new event_date=... directories on its own. Without this, Athena
+# queries a table whose S3 location is full of data and returns zero rows.
+# ---------------------------------------------------------------------------
+def repair(table):
+    try:
+        spark.sql(f"MSCK REPAIR TABLE `{args['GLUE_DATABASE']}`.`{table}`")
+        n = spark.sql(f"SHOW PARTITIONS `{args['GLUE_DATABASE']}`.`{table}`").count()
+        print(f"[partitions] {table}: {n} registered")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[partitions][WARN] {table}: {exc}")
+
+repair("bench_parquet_part")
+
 print(
     f"[bench] done. {row_count} identical rows materialized three ways "
     f"across {distinct_dates} distinct event dates."

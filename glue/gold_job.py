@@ -191,6 +191,24 @@ fact_partitions = max(1, min(20, fact_count // 200_000 + 1))
 print(f"[gold] star schema written to {TARGET}")
 
 # ---------------------------------------------------------------------------
+# Register the partitions just written.
+#
+# The Glue tables are declared explicitly in Terraform (no crawler), so nothing
+# discovers new event_date=... directories on its own. Without this, Athena
+# queries a table whose S3 location is full of data and returns zero rows.
+# ---------------------------------------------------------------------------
+def repair(table):
+    try:
+        spark.sql(f"MSCK REPAIR TABLE `{args['GLUE_DATABASE']}`.`{table}`")
+        n = spark.sql(f"SHOW PARTITIONS `{args['GLUE_DATABASE']}`.`{table}`").count()
+        print(f"[partitions] {table}: {n} registered")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[partitions][WARN] {table}: {exc}")
+
+repair("fact_orders")
+
+
+# ---------------------------------------------------------------------------
 # Data freshness metric
 #
 # now - max(event_timestamp) in gold. This is the signal that catches the worst
@@ -218,5 +236,56 @@ if EMIT_METRIC:
         print("[gold] no fact rows - freshness metric not emitted")
 else:
     print("[gold] freshness metric disabled by configuration")
+
+# ---------------------------------------------------------------------------
+# Quarantine summary
+#
+# The dashboard needs "quarantine counts broken down by rejection reason", but
+# hb-dashboard-reader is deliberately NOT granted read access to the quarantine
+# prefix: those objects contain the raw rejected payloads, which by definition
+# never passed validation and may carry malformed or unvalidated customer
+# identifiers. Exposing them to a public web dashboard would be wrong.
+#
+# So the aggregate is computed here, inside the trusted pipeline, and published
+# to gold/ as counts only — no payloads. The dashboard reads the summary.
+# ---------------------------------------------------------------------------
+QUARANTINE = f"s3://{BUCKET}/{args['QUARANTINE_PREFIX']}/"
+try:
+    quarantine = spark.read.option("basePath", QUARANTINE).json(QUARANTINE)
+
+    summary = (
+        quarantine.groupBy("reject_reason", "ingest_date")
+        .agg(
+            F.count(F.lit(1)).cast(T.LongType()).alias("reject_count"),
+            F.max("rejected_at").alias("last_seen_at"),
+            # One representative detail per reason, so the dashboard can show
+            # WHY without ever surfacing a raw payload.
+            F.first("reject_detail", ignorenulls=True).alias("sample_detail"),
+        )
+        .orderBy(F.col("reject_count").desc())
+    )
+
+    summary.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(
+        f"{TARGET}/quarantine_summary/"
+    )
+    total_rejects = summary.agg(F.sum("reject_count")).collect()[0][0] or 0
+    print(f"[gold] quarantine_summary written: {total_rejects} rejected rows across "
+          f"{summary.count()} (reason, date) pairs")
+
+except Exception as exc:  # noqa: BLE001
+    # An empty quarantine prefix is a legitimate state (nothing has been
+    # rejected yet), not a pipeline failure. Write an empty summary so the
+    # dashboard query still resolves against a real table.
+    print(f"[gold] quarantine summary skipped: {exc}")
+    empty_schema = T.StructType([
+        T.StructField("reject_reason", T.StringType()),
+        T.StructField("ingest_date", T.StringType()),
+        T.StructField("reject_count", T.LongType()),
+        T.StructField("last_seen_at", T.StringType()),
+        T.StructField("sample_detail", T.StringType()),
+    ])
+    spark.createDataFrame([], empty_schema).coalesce(1).write.mode("overwrite").option(
+        "compression", "snappy"
+    ).parquet(f"{TARGET}/quarantine_summary/")
 
 job.commit()

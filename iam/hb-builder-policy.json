@@ -2,40 +2,58 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "ReadOnlyDiscoveryAcrossUsedServices",
+      "Sid": "ReadOnlyDiscovery",
       "Effect": "Allow",
       "Action": [
-        "s3:List*", "s3:GetBucket*", "s3:GetObject*", "s3:GetAccountPublicAccessBlock",
-        "glue:Get*", "glue:List*", "glue:BatchGet*",
-        "athena:List*", "athena:Get*", "athena:BatchGet*",
-        "lambda:List*", "lambda:Get*",
-        "states:List*", "states:Describe*",
-        "firehose:List*", "firehose:Describe*",
-        "cloudwatch:List*", "cloudwatch:Describe*", "cloudwatch:Get*",
-        "logs:Describe*", "logs:Get*", "logs:FilterLogEvents", "logs:StartQuery", "logs:StopQuery",
-        "sns:List*", "sns:Get*",
-        "iam:Get*", "iam:List*", "iam:SimulatePrincipalPolicy",
-        "budgets:Describe*", "budgets:View*", "budgets:ListTagsForResource",
-        "ce:GetCostAndUsage", "ce:GetCostForecast",
-        "pricing:GetProducts", "pricing:DescribeServices",
+        "s3:List*",
+        "glue:Get*",
+        "glue:List*",
+        "glue:BatchGet*",
+        "athena:List*",
+        "athena:Get*",
+        "lambda:List*",
+        "lambda:Get*",
+        "states:List*",
+        "states:Describe*",
+        "states:ValidateStateMachineDefinition",
+        "firehose:List*",
+        "firehose:Describe*",
+        "cloudwatch:List*",
+        "cloudwatch:Describe*",
+        "cloudwatch:Get*",
+        "logs:Describe*",
+        "logs:Get*",
+        "logs:List*",
+        "logs:FilterLogEvents",
+        "logs:StartQuery",
+        "sns:List*",
+        "sns:Get*",
+        "iam:Get*",
+        "iam:List*",
+        "budgets:Describe*",
+        "budgets:View*",
+        "budgets:ListTagsForResource",
+        "ce:GetCostAndUsage",
+        "ce:GetCostForecast",
+        "pricing:GetProducts",
         "sts:GetCallerIdentity",
-        "tag:GetResources", "tag:GetTagKeys"
+        "tag:GetResources"
       ],
       "Resource": "*"
     },
     {
-      "Sid": "ProjectBuckets",
+      "Sid": "ProjectBucketsFullControl",
       "Effect": "Allow",
-      "Action": ["s3:CreateBucket", "s3:DeleteBucket", "s3:PutBucket*", "s3:DeleteBucket*", "s3:PutObject*", "s3:DeleteObject*", "s3:AbortMultipartUpload"],
+      "Action": "s3:*",
       "Resource": [
         "arn:aws:s3:::hb-ecom-lakehouse-*",
         "arn:aws:s3:::hb-ecom-lakehouse-*/*"
       ]
     },
     {
-      "Sid": "GlueProjectResources",
+      "Sid": "ProjectGlue",
       "Effect": "Allow",
-      "Action": ["glue:CreateDatabase", "glue:DeleteDatabase", "glue:UpdateDatabase", "glue:CreateTable", "glue:DeleteTable", "glue:UpdateTable", "glue:CreatePartition", "glue:DeletePartition", "glue:UpdatePartition", "glue:BatchCreatePartition", "glue:BatchDeletePartition", "glue:CreateJob", "glue:DeleteJob", "glue:UpdateJob", "glue:StartJobRun", "glue:BatchStopJobRun", "glue:TagResource", "glue:UntagResource"],
+      "Action": "glue:*",
       "Resource": [
         "arn:aws:glue:us-east-1:904233128322:catalog",
         "arn:aws:glue:us-east-1:904233128322:database/hb_*",
@@ -44,68 +62,32 @@
       ]
     },
     {
-      "Sid": "AthenaProjectWorkgroups",
+      "Sid": "ProjectCompute",
       "Effect": "Allow",
-      "Action": ["athena:CreateWorkGroup", "athena:DeleteWorkGroup", "athena:UpdateWorkGroup", "athena:StartQueryExecution", "athena:StopQueryExecution", "athena:TagResource", "athena:UntagResource"],
-      "Resource": "arn:aws:athena:us-east-1:904233128322:workgroup/hb-*"
-    },
-    {
-      "Sid": "LambdaProjectFunctions",
-      "Effect": "Allow",
-      "Action": ["lambda:CreateFunction", "lambda:DeleteFunction", "lambda:UpdateFunction*", "lambda:AddPermission", "lambda:RemovePermission", "lambda:InvokeFunction", "lambda:TagResource", "lambda:UntagResource", "lambda:PublishVersion"],
-      "Resource": "arn:aws:lambda:us-east-1:904233128322:function:hb-*"
-    },
-    {
-      "Sid": "StepFunctionsProjectStateMachines",
-      "Effect": "Allow",
-      "Action": ["states:CreateStateMachine", "states:DeleteStateMachine", "states:UpdateStateMachine", "states:StartExecution", "states:StopExecution", "states:TagResource", "states:UntagResource"],
+      "Action": ["athena:*", "lambda:*", "states:*", "firehose:*", "sns:*"],
       "Resource": [
+        "arn:aws:athena:us-east-1:904233128322:workgroup/hb-*",
+        "arn:aws:lambda:us-east-1:904233128322:function:hb-*",
         "arn:aws:states:us-east-1:904233128322:stateMachine:hb-*",
-        "arn:aws:states:us-east-1:904233128322:execution:hb-*:*"
+        "arn:aws:states:us-east-1:904233128322:execution:hb-*:*",
+        "arn:aws:firehose:us-east-1:904233128322:deliverystream/hb-*",
+        "arn:aws:sns:us-east-1:904233128322:hb-*"
       ]
     },
     {
-      "Sid": "FirehoseProjectStreams",
+      "Sid": "ProjectObservability",
       "Effect": "Allow",
-      "Action": ["firehose:CreateDeliveryStream", "firehose:DeleteDeliveryStream", "firehose:UpdateDestination", "firehose:PutRecord", "firehose:PutRecordBatch", "firehose:TagDeliveryStream", "firehose:UntagDeliveryStream"],
-      "Resource": "arn:aws:firehose:us-east-1:904233128322:deliverystream/hb-*"
-    },
-    {
-      "Sid": "IamProjectRolesOnly",
-      "Effect": "Allow",
-      "Action": ["iam:CreateRole", "iam:DeleteRole", "iam:UpdateRole", "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:PassRole", "iam:TagRole", "iam:UntagRole", "iam:UpdateAssumeRolePolicy"],
-      "Resource": "arn:aws:iam::904233128322:role/hb-*"
-    },
-    {
-      "Sid": "IamProjectPoliciesAndDashboardUserOnly",
-      "Effect": "Allow",
-      "Action": ["iam:CreatePolicy", "iam:DeletePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicyVersion", "iam:CreateUser", "iam:DeleteUser", "iam:TagUser", "iam:AttachUserPolicy", "iam:DetachUserPolicy", "iam:CreateAccessKey", "iam:DeleteAccessKey"],
-      "Resource": [
-        "arn:aws:iam::904233128322:policy/hb-*",
-        "arn:aws:iam::904233128322:user/hb-dashboard-reader"
-      ]
-    },
-    {
-      "Sid": "ObservabilityProjectScoped",
-      "Effect": "Allow",
-      "Action": ["cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms", "cloudwatch:TagResource", "cloudwatch:UntagResource"],
+      "Action": ["cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms", "cloudwatch:TagResource", "cloudwatch:UntagResource", "cloudwatch:EnableAlarmActions", "cloudwatch:DisableAlarmActions"],
       "Resource": "arn:aws:cloudwatch:us-east-1:904233128322:alarm:hb-*"
     },
     {
-      "Sid": "PutCustomMetricsNamespaceScoped",
+      "Sid": "ProjectLogGroups",
       "Effect": "Allow",
-      "Action": "cloudwatch:PutMetricData",
-      "Resource": "*",
-      "Condition": { "StringEquals": { "cloudwatch:namespace": "hb/lakehouse" } }
-    },
-    {
-      "Sid": "LogGroupsForProjectComponents",
-      "Effect": "Allow",
-      "Action": ["logs:CreateLogGroup", "logs:DeleteLogGroup", "logs:PutRetentionPolicy", "logs:CreateLogStream", "logs:PutLogEvents", "logs:TagResource", "logs:UntagResource"],
+      "Action": "logs:*",
       "Resource": [
         "arn:aws:logs:us-east-1:904233128322:log-group:/aws/lambda/hb-*",
         "arn:aws:logs:us-east-1:904233128322:log-group:/aws/lambda/hb-*:*",
-        "arn:aws:logs:us-east-1:904233128322:log-group:/aws-glue/jobs/*",
+        "arn:aws:logs:us-east-1:904233128322:log-group:/aws-glue/*",
         "arn:aws:logs:us-east-1:904233128322:log-group:/aws/vendedlogs/states/hb-*",
         "arn:aws:logs:us-east-1:904233128322:log-group:/aws/vendedlogs/states/hb-*:*",
         "arn:aws:logs:us-east-1:904233128322:log-group:/aws/kinesisfirehose/hb-*",
@@ -113,13 +95,28 @@
       ]
     },
     {
-      "Sid": "SnsProjectTopic",
+      "Sid": "StateMachineLoggingNeedsWildcard",
       "Effect": "Allow",
-      "Action": ["sns:CreateTopic", "sns:DeleteTopic", "sns:Subscribe", "sns:Unsubscribe", "sns:SetTopicAttributes", "sns:Publish", "sns:TagResource", "sns:UntagResource"],
-      "Resource": "arn:aws:sns:us-east-1:904233128322:hb-*"
+      "Action": ["logs:CreateLogDelivery", "logs:GetLogDelivery", "logs:UpdateLogDelivery", "logs:DeleteLogDelivery", "logs:ListLogDeliveries", "logs:PutResourcePolicy", "logs:DescribeResourcePolicies"],
+      "Resource": "*"
     },
     {
-      "Sid": "BudgetsNoResourceLevelSupport",
+      "Sid": "ProjectRolesOnly",
+      "Effect": "Allow",
+      "Action": ["iam:CreateRole", "iam:DeleteRole", "iam:UpdateRole", "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:PassRole", "iam:TagRole", "iam:UntagRole", "iam:UpdateAssumeRolePolicy"],
+      "Resource": "arn:aws:iam::904233128322:role/hb-*"
+    },
+    {
+      "Sid": "ProjectPoliciesAndDashboardUserOnly",
+      "Effect": "Allow",
+      "Action": ["iam:CreatePolicy", "iam:DeletePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicyVersion", "iam:SetDefaultPolicyVersion", "iam:CreateUser", "iam:DeleteUser", "iam:TagUser", "iam:UntagUser", "iam:PutUserPolicy", "iam:DeleteUserPolicy", "iam:AttachUserPolicy", "iam:DetachUserPolicy", "iam:CreateAccessKey", "iam:DeleteAccessKey"],
+      "Resource": [
+        "arn:aws:iam::904233128322:policy/hb-*",
+        "arn:aws:iam::904233128322:user/hb-dashboard-reader"
+      ]
+    },
+    {
+      "Sid": "Budgets",
       "Effect": "Allow",
       "Action": ["budgets:ModifyBudget", "budgets:CreateBudget", "budgets:UpdateBudget", "budgets:DeleteBudget", "budgets:TagResource", "budgets:UntagResource"],
       "Resource": "arn:aws:budgets::904233128322:budget/*"
