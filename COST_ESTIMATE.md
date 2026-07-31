@@ -95,15 +95,35 @@ could fire while the original is still waiting to start. Those run on standard G
 
 | Line item | Quantity | Cost/month |
 |---|---|---|
-| **CloudWatch alarms** (Lambda errors, Glue failure, freshness lag) ⁽ᵇ⁾ | 3–5 alarm-metrics | **$0.30–0.50** |
-| **CloudWatch custom metric × 1** (data freshness lag) | 1 metric | **$0.30** |
+**Counted from `terraform plan`, not estimated** ⁽ᵇ⁾:
+
+| Line item | Quantity | Cost/month |
+|---|---|---|
+| `hb-validator-error-rate` (metric-math: Errors + Invocations) | **2** alarm-metrics | **$0.20** |
+| `hb-state-machine-failed` (AWS/States ExecutionsFailed) | **1** alarm-metric | **$0.10** |
+| `hb-data-freshness-lag` | **1** alarm-metric | **$0.10** |
+| Custom metric `DataFreshnessLagSeconds` | **1** metric | **$0.30** |
 | S3 storage (2 GB corpus + ~0.5 GB curated) | 2.5 GB | **$0.06** |
 | CloudWatch Logs storage | 0.2 GB | **$0.01** |
-| **TOTAL RECURRING** | | **≈ $0.67–0.87 / month** |
+| **TOTAL RECURRING** | | **≈ $0.77 / month** |
+| *with `enable_freshness_metric = false`* | | ***≈ $0.37 / month*** |
 
-⁽ᵇ⁾ CloudWatch bills **per alarm-metric**, not per alarm. A Glue-failure alarm defined
-per-job-name becomes 3 alarm-metrics, not 1. I will count the actual alarm-metrics from
-`terraform plan` before apply and reconcile this line at $0.10 each.
+⁽ᵇ⁾ **This line was wrong in an earlier draft and the reconciliation caught it.** Two errors,
+both in the expensive direction:
+
+1. CloudWatch bills **per metric analyzed**, not per alarm. The Lambda error-rate alarm is a
+   metric-math alarm over `Errors` and `Invocations`, so it counts as **2** alarm-metrics, not 1.
+2. The first draft emitted **three** custom metrics (`DataFreshnessLagSeconds`,
+   `GoldFactRowCount`, `PipelineFailed`) at $0.30 each — $0.90/month, triple the $0.30 estimated.
+
+Both were fixed rather than just re-documented:
+- `PipelineFailed` was **deleted**. CloudWatch's own `AWS/States ExecutionsFailed` is free and
+  fires on exactly the same condition, so the custom metric was paying $0.30/month for a
+  duplicate signal. The Step Functions role lost its `cloudwatch:PutMetricData` grant as a
+  direct result — a cost decision that also shrank an IAM policy.
+- `GoldFactRowCount` was **deleted**. The dashboard already gets row counts from Athena.
+
+Net effect: idle cost went from **$1.46/month** as originally written to **$0.77/month**.
 
 ### After `terraform destroy`
 

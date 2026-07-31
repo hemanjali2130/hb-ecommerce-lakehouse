@@ -15,7 +15,7 @@
         "logs:Describe*", "logs:Get*", "logs:FilterLogEvents", "logs:StartQuery", "logs:StopQuery",
         "sns:List*", "sns:Get*",
         "iam:Get*", "iam:List*", "iam:SimulatePrincipalPolicy",
-        "budgets:Describe*", "budgets:View*",
+        "budgets:Describe*", "budgets:View*", "budgets:ListTagsForResource",
         "ce:GetCostAndUsage", "ce:GetCostForecast",
         "pricing:GetProducts", "pricing:DescribeServices",
         "sts:GetCallerIdentity",
@@ -121,7 +121,7 @@
     {
       "Sid": "BudgetsNoResourceLevelSupport",
       "Effect": "Allow",
-      "Action": ["budgets:ModifyBudget", "budgets:CreateBudget", "budgets:UpdateBudget", "budgets:DeleteBudget"],
+      "Action": ["budgets:ModifyBudget", "budgets:CreateBudget", "budgets:UpdateBudget", "budgets:DeleteBudget", "budgets:TagResource", "budgets:UntagResource"],
       "Resource": "arn:aws:budgets::904233128322:budget/*"
     }
   ]
