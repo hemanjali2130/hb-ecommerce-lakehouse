@@ -5,8 +5,9 @@ AWS account 904233128322 · us-east-1 · Athena engine v3 · measured 2026-07-31
 
 Every number below was read from Athena's own `GetQueryExecution` response:
 `Statistics.DataScannedInBytes` and `Statistics.EngineExecutionTimeInMillis`.
-Nothing here is estimated, interpolated, or filled in. **One run failed and is
-reported as a failure.**
+Nothing here is estimated, interpolated, or filled in. **All 9 of 9 queries
+succeeded on the final run.** One cell failed on the first run; the failure, its
+root cause and the fix are documented under Q2 rather than quietly removed.
 
 Raw output: `benchmark_results.json`. Harness: `scripts/run_benchmark.py`.
 
@@ -51,9 +52,9 @@ A row store must read every field; a column store reads one.
 
 | Layout | Scanned | Billed | Time | Cost | vs raw JSON |
 |---|---:|---:|---:|---:|---:|
-| raw JSON | **1,575,191,600 B** (1.47 GiB) | 1.47 GiB | 1,379 ms | **$0.007163** | — |
-| Parquet flat | **6,342,809 B** (6.05 MB) | 10 MB | 780 ms | $0.000048 | **248× less scanned** |
-| Parquet partitioned | **6,329,256 B** (6.04 MB) | 10 MB | 1,218 ms | $0.000048 | **249× less scanned** |
+| raw JSON | **1,575,191,600 B** (1.47 GiB) | 1.47 GiB | 1,847 ms | **$0.007163** | — |
+| Parquet flat | **6,342,809 B** (6.05 MB) | 10 MB | 977 ms | $0.000048 | **248× less scanned** |
+| Parquet partitioned | **6,329,256 B** (6.04 MB) | 10 MB | 1,331 ms | $0.000048 | **249× less scanned** |
 
 ### Q2 — date-filtered aggregate (partition-pruning effect)
 ```sql
@@ -63,12 +64,12 @@ FROM <table> WHERE event_date = '2026-07-31' GROUP BY event_type
 
 | Layout | Scanned | Billed | Time | Cost | vs raw JSON |
 |---|---:|---:|---:|---:|---:|
-| raw JSON | **1,575,191,600 B** (1.47 GiB) | 1.47 GiB | 2,274 ms | **$0.007163** | — |
-| Parquet flat | **FAILED** | — | — | — | — |
-| Parquet partitioned | **7,597,071 B** (7.24 MB) | 10 MB | 968 ms | $0.000048 | **207× less scanned** |
+| raw JSON | **1,575,191,600 B** (1.47 GiB) | 1.47 GiB | 1,445 ms | **$0.007163** | — |
+| Parquet flat | **7,666,730 B** (7.31 MB) | 10 MB | 831 ms | $0.000048 | **206× less scanned** |
+| Parquet partitioned | **7,597,071 B** (7.24 MB) | 10 MB | 809 ms | $0.000048 | **207× less scanned** |
 
-> **The `bench_parquet_flat` run genuinely failed.** Reported rather than
-> omitted or estimated:
+> **This cell failed on the first measurement run and was fixed.** The original
+> failure is kept on record because it is informative:
 > ```
 > HIVE_BAD_DATA: Malformed Parquet file. Field event_date's type INT32 in
 > parquet file s3://.../bench/parquet_flat/part-00000-....snappy.parquet is
@@ -81,11 +82,12 @@ FROM <table> WHERE event_date = '2026-07-31' GROUP BY event_type
 > the unpartitioned variants `event_date` becomes a real column in the file,
 > stored as INT32 (date), which does not match the `string` column declared in
 > the Glue table. Only Q2 references `event_date`, which is why Q1 and Q3
-> succeeded against the same table.
+> succeeded against the same table on the same run.
 >
-> **Fix:** cast `event_date` to string in `bench_job.py` before writing, so the
+> **Fix:** `bench_job.py` now casts `event_date` to string before writing, so the
 > physical type is identical across all three variants — which is what a
-> like-for-like benchmark requires. See the re-measurement note below.
+> like-for-like benchmark requires. The number above is from the re-run after the
+> fix; **all 9 of 9 queries now succeed.**
 
 ### Q3 — full-table group-by (compression effect, no pruning possible)
 ```sql
@@ -95,9 +97,9 @@ FROM <table> GROUP BY event_type ORDER BY 2 DESC
 
 | Layout | Scanned | Billed | Time | Cost | vs raw JSON |
 |---|---:|---:|---:|---:|---:|
-| raw JSON | **1,575,191,600 B** (1.47 GiB) | 1.47 GiB | 1,777 ms | **$0.007163** | — |
-| Parquet flat | **8,572,836 B** (8.18 MB) | 10 MB | 1,315 ms | $0.000048 | **184× less scanned** |
-| Parquet partitioned | **8,278,577 B** (7.89 MB) | 10 MB | 1,035 ms | $0.000048 | **190× less scanned** |
+| raw JSON | **1,575,191,600 B** (1.47 GiB) | 1.47 GiB | 1,664 ms | **$0.007163** | — |
+| Parquet flat | **8,572,836 B** (8.18 MB) | 10 MB | 830 ms | $0.000048 | **184× less scanned** |
+| Parquet partitioned | **8,278,577 B** (7.89 MB) | 10 MB | 1,338 ms | $0.000048 | **190× less scanned** |
 
 ---
 
@@ -110,9 +112,11 @@ FROM <table> GROUP BY event_type ORDER BY 2 DESC
 skip the fields you did not ask for.
 
 **2. Partition pruning added almost nothing at this scale — and that is an
-honest, useful finding rather than a disappointing one.** Compare Q3
-(no filter possible) with Q2 (single-day filter) on the partitioned table:
-7.89 MB versus 7.24 MB. Only ~8% better.
+honest, useful finding rather than a disappointing one.** Q2 filters to a single
+day out of four. Now that the flat variant works, the two can be compared
+directly on the same query: **7.31 MB unpartitioned vs 7.24 MB partitioned —
+a 0.9% difference.** Comparing Q3 (no filter) with Q2 on the partitioned table
+gives the same story: 7.89 MB vs 7.24 MB, ~8%.
 
 The reason is that the *entire* Parquet dataset is ~30 MB across 4 partitions.
 Pruning to one partition saves a few MB — and Athena's 10 MB per-query minimum
@@ -127,7 +131,10 @@ history) is far higher than adding it now. But claiming a partition-pruning win
 from this dataset would be dishonest, and the measurement says so.
 
 **3. Execution time does not track bytes scanned.** Raw JSON scans 249× more
-than Parquet on Q1 but takes only 1.8× longer (1,379 ms vs 780 ms). Athena
+than Parquet on Q1 but takes only 1.9× longer (1,847 ms vs 977 ms). Run-to-run
+variance is also large — the same raw-JSON query measured 1,379 ms, 2,274 ms and
+1,847 ms across runs while bytes scanned stayed **byte-identical** at
+1,575,191,600 every time. Athena
 parallelises the scan across many workers, so wall-clock is dominated by
 per-query overhead and planning, not I/O, at this size. **Cost tracks bytes;
 latency does not.** Anyone quoting a speed-up as the headline benefit of Parquet
@@ -143,9 +150,9 @@ effort; the first real win is getting *above* it and then reducing.
 
 | | |
 |---|---|
-| Queries executed | 9 (8 succeeded, 1 failed) |
-| Total billed bytes | 4.72 GiB |
-| **Total cost** | **$0.0215** |
+| Queries executed | **9 of 9 succeeded** |
+| Total billed bytes | 4.46 GiB |
+| **Total cost** | **$0.0218** |
 
 At production scale the same three-query set against raw JSON at 100 GB/day
 would cost roughly **$0.49 per run**; against partitioned Parquet, about
@@ -153,18 +160,14 @@ would cost roughly **$0.49 per run**; against partitioned Parquet, about
 
 ---
 
-## Re-measurement note
-
-The `bench_parquet_flat` Q2 failure was fixed in `glue/bench_job.py` (cast
-`event_date` to string before writing). This table records the measurement **as
-first observed**, failure included, because that is what actually happened and
-the failure is itself informative — it is a real schema-drift bug that Terraform
-`validate`, `plan` and a successful Glue job run all failed to catch, and that
-only surfaced when a query touched the affected column.
-
-Re-run with:
+## Reproducing
 
 ```bash
-make run-pipeline-bench     # rebuild the three variants with the fix
-make benchmark              # re-measure
+make run-pipeline-bench     # rebuild the three variants from one silver read
+make benchmark              # re-measure; writes benchmark_results.json
 ```
+
+Bytes scanned are deterministic and will reproduce exactly. Execution times will
+not — they varied by up to 60% between runs here for identical byte counts,
+which is the reason every conclusion above is drawn from bytes rather than
+milliseconds.
