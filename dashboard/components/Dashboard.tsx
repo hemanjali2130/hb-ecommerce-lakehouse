@@ -151,6 +151,8 @@ type Metrics = {
     quarantinedRows: number;
     lateArrivals: number;
     grossRevenue: number;
+    totalValidEvents: number;
+    totalGeneratedEvents: number;
     quarantineRatePct: number;
   };
 };
@@ -209,7 +211,7 @@ export default function Dashboard() {
             <StatTile
               label="Order lines in gold"
               value={metrics.data.stages.goldFactRows.toLocaleString()}
-              sub={`${metrics.data.stages.customers.toLocaleString()} customers · ${metrics.data.stages.products.toLocaleString()} products`}
+              sub={`${metrics.data.stages.totalValidEvents.toLocaleString()} valid events · ${metrics.data.stages.customers.toLocaleString()} customers · ${metrics.data.stages.products.toLocaleString()} products`}
             />
             <StatTile
               label="Gross revenue"
@@ -219,7 +221,7 @@ export default function Dashboard() {
             <StatTile
               label="Quarantined"
               value={metrics.data.stages.quarantinedRows.toLocaleString()}
-              sub={`${metrics.data.stages.quarantineRatePct.toFixed(2)}% of all records`}
+              sub={`${metrics.data.stages.quarantineRatePct.toFixed(2)}% of ${metrics.data.stages.totalGeneratedEvents.toLocaleString()} generated events`}
               tone="warning"
             />
             <StatTile

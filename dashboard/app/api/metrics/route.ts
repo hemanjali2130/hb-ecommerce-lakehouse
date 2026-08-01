@@ -25,7 +25,13 @@ export async function GET() {
       (SELECT COUNT(DISTINCT product_key)  FROM dim_product)  AS gold_products,
       (SELECT COALESCE(SUM(reject_count), 0) FROM quarantine_summary) AS quarantined_rows,
       (SELECT COALESCE(SUM(gross_amount), 0) FROM fact_orders) AS gross_revenue,
-      (SELECT COUNT(*) FROM fact_orders WHERE is_late_arrival) AS late_arrivals
+      (SELECT COUNT(*) FROM fact_orders WHERE is_late_arrival) AS late_arrivals,
+      -- Total VALID events of every type, not just orders.
+      -- dim_customer.total_events counts every silver row per customer, so
+      -- summing it gives the full validated event count. fact_orders is the
+      -- wrong denominator for a quarantine rate: it holds only order_placed
+      -- events (~17% of traffic), which inflates the rate roughly 5x.
+      (SELECT COALESCE(SUM(total_events), 0) FROM dim_customer) AS total_valid_events
     `,
   );
 
@@ -38,6 +44,8 @@ export async function GET() {
 
   const goldRows = num("gold_fact_rows");
   const quarantined = num("quarantined_rows");
+  const totalValid = num("total_valid_events");
+  const totalGenerated = totalValid + quarantined;
 
   return NextResponse.json({
     status: "ok",
@@ -51,9 +59,12 @@ export async function GET() {
       quarantinedRows: quarantined,
       lateArrivals: num("late_arrivals"),
       grossRevenue: num("gross_revenue"),
-      // Share of records the platform rejected rather than silently accepted.
-      quarantineRatePct:
-        goldRows + quarantined > 0 ? (100 * quarantined) / (goldRows + quarantined) : 0,
+      totalValidEvents: totalValid,
+      totalGeneratedEvents: totalGenerated,
+      // Share of ALL generated events the platform rejected rather than
+      // silently accepted. Denominator is every valid event plus every
+      // quarantined one — not fact_orders, which holds only order_placed.
+      quarantineRatePct: totalGenerated > 0 ? (100 * quarantined) / totalGenerated : 0,
     },
   });
 }
