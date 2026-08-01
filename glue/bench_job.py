@@ -90,6 +90,23 @@ COLUMNS = [
 
 base = silver.select(*COLUMNS)
 
+# event_date MUST be written as a string.
+#
+# Silver is written with partitionBy("event_date"), and when Spark reads a
+# partitioned dataset back it INFERS the partition column's type — turning what
+# was a string into DateType. In the partitioned variant that is invisible,
+# because Athena reads partition values from the S3 path as strings. But in the
+# two UNPARTITIONED variants event_date becomes a real column in the file, and
+# Spark then stores it as INT32 (date), which does not match the `string` column
+# declared in the Glue table. Athena rejects the file at query time:
+#
+#   HIVE_BAD_DATA: Malformed Parquet file. Field event_date's type INT32 ... is
+#   incompatible with type varchar defined in table schema
+#
+# Casting here keeps the physical type identical across all three variants,
+# which is exactly what a like-for-like benchmark requires.
+base = base.withColumn("event_date", F.col("event_date").cast("string"))
+
 # File count is held constant across variants so the comparison measures format
 # and pruning, not per-file overhead differences.
 file_count = max(1, min(16, row_count // 400_000 + 1))

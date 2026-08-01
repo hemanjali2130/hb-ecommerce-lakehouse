@@ -1,0 +1,126 @@
+{
+  "generated_at": "2026-08-01T00:00:29.715612+00:00",
+  "pivot_date": "2026-07-31",
+  "workgroup": "hb-benchmark-wg",
+  "database": "hb_lakehouse",
+  "results": {
+    "Q1_narrow_projection": {
+      "rationale": "Sum revenue over one column. Tests columnar projection: a row store must read every field, a column store reads one.",
+      "runs": {
+        "bench_raw_json": {
+          "ok": true,
+          "query_id": "5efa5c4f-6bb7-496f-8ec7-535f2d19f22f",
+          "scanned_bytes": 1575191600,
+          "billed_bytes": 1575191600,
+          "exec_ms": 1379,
+          "total_ms": 1575,
+          "cost_usd": 0.007163142072386108,
+          "raw_cost_usd": 0.007163142072386108,
+          "label": "raw JSON, uncompressed, unpartitioned",
+          "sql": "SELECT SUM(gross_amount) AS total_revenue FROM bench_raw_json"
+        },
+        "bench_parquet_flat": {
+          "ok": true,
+          "query_id": "3fa0bb78-e4f9-4bf7-8c5f-6b89f4ac5e92",
+          "scanned_bytes": 6342809,
+          "billed_bytes": 10485760,
+          "exec_ms": 780,
+          "total_ms": 969,
+          "cost_usd": 4.76837158203125e-05,
+          "raw_cost_usd": 2.8843755899288226e-05,
+          "label": "Parquet + Snappy, unpartitioned",
+          "sql": "SELECT SUM(gross_amount) AS total_revenue FROM bench_parquet_flat"
+        },
+        "bench_parquet_part": {
+          "ok": true,
+          "query_id": "4a1bdd56-30d8-41f9-b1ac-37bd03b8df28",
+          "scanned_bytes": 6329256,
+          "billed_bytes": 10485760,
+          "exec_ms": 1218,
+          "total_ms": 1419,
+          "cost_usd": 4.76837158203125e-05,
+          "raw_cost_usd": 2.8782123990822583e-05,
+          "label": "Parquet + Snappy, partitioned by event_date",
+          "sql": "SELECT SUM(gross_amount) AS total_revenue FROM bench_parquet_part"
+        }
+      }
+    },
+    "Q2_date_filtered_aggregate": {
+      "rationale": "Aggregate a single day. Tests partition pruning: only the partitioned variant can skip the other days entirely.",
+      "runs": {
+        "bench_raw_json": {
+          "ok": true,
+          "query_id": "8915c1d8-ecec-42e8-98df-dc49caa69d57",
+          "scanned_bytes": 1575191600,
+          "billed_bytes": 1575191600,
+          "exec_ms": 2274,
+          "total_ms": 2508,
+          "cost_usd": 0.007163142072386108,
+          "raw_cost_usd": 0.007163142072386108,
+          "label": "raw JSON, uncompressed, unpartitioned",
+          "sql": "SELECT event_type, COUNT(*) AS n, SUM(gross_amount) AS revenue FROM bench_raw_json WHERE event_date = '2026-07-31' GROUP BY event_type"
+        },
+        "bench_parquet_flat": {
+          "ok": false,
+          "error": "FAILED: HIVE_BAD_DATA: Malformed Parquet file. Field event_date's type INT32 in parquet file s3://hb-ecom-lakehouse-904233-data/bench/parquet_flat/part-00000-0ba177ce-595b-4c0d-8d4b-bcc159ef99fc-c000.snappy.parquet is incompatible with type varchar defined in table schema [s3://hb-ecom-lakehouse-904233-data/bench/parquet_flat/part-00000-0ba177ce-595b-4c0d-8d4b-bcc159ef99fc-c000.snappy.parquet]",
+          "query_id": "5d470eed-300b-4ee2-a256-e519aefa48a3",
+          "label": "Parquet + Snappy, unpartitioned",
+          "sql": "SELECT event_type, COUNT(*) AS n, SUM(gross_amount) AS revenue FROM bench_parquet_flat WHERE event_date = '2026-07-31' GROUP BY event_type"
+        },
+        "bench_parquet_part": {
+          "ok": true,
+          "query_id": "395340b1-29af-422c-9cc0-dd141cdf2c75",
+          "scanned_bytes": 7597071,
+          "billed_bytes": 10485760,
+          "exec_ms": 968,
+          "total_ms": 1164,
+          "cost_usd": 4.76837158203125e-05,
+          "raw_cost_usd": 3.454747911746381e-05,
+          "label": "Parquet + Snappy, partitioned by event_date",
+          "sql": "SELECT event_type, COUNT(*) AS n, SUM(gross_amount) AS revenue FROM bench_parquet_part WHERE event_date = '2026-07-31' GROUP BY event_type"
+        }
+      }
+    },
+    "Q3_full_scan_groupby": {
+      "rationale": "Group the whole table by type. No pruning is possible, so this isolates the effect of compression and encoding alone.",
+      "runs": {
+        "bench_raw_json": {
+          "ok": true,
+          "query_id": "a7e2d497-6cb2-46cc-9e3f-91fbfdb53831",
+          "scanned_bytes": 1575191600,
+          "billed_bytes": 1575191600,
+          "exec_ms": 1777,
+          "total_ms": 1976,
+          "cost_usd": 0.007163142072386108,
+          "raw_cost_usd": 0.007163142072386108,
+          "label": "raw JSON, uncompressed, unpartitioned",
+          "sql": "SELECT event_type, COUNT(*) AS n, AVG(unit_price) AS avg_price FROM bench_raw_json GROUP BY event_type ORDER BY n DESC"
+        },
+        "bench_parquet_flat": {
+          "ok": true,
+          "query_id": "5d33d9aa-ceef-475f-bd6d-768a83b46044",
+          "scanned_bytes": 8572836,
+          "billed_bytes": 10485760,
+          "exec_ms": 1315,
+          "total_ms": 1709,
+          "cost_usd": 4.76837158203125e-05,
+          "raw_cost_usd": 3.8984744605841115e-05,
+          "label": "Parquet + Snappy, unpartitioned",
+          "sql": "SELECT event_type, COUNT(*) AS n, AVG(unit_price) AS avg_price FROM bench_parquet_flat GROUP BY event_type ORDER BY n DESC"
+        },
+        "bench_parquet_part": {
+          "ok": true,
+          "query_id": "afff0a21-be7b-49f1-9ecc-1d824a77b521",
+          "scanned_bytes": 8278577,
+          "billed_bytes": 10485760,
+          "exec_ms": 1035,
+          "total_ms": 1188,
+          "cost_usd": 4.76837158203125e-05,
+          "raw_cost_usd": 3.7646609598596115e-05,
+          "label": "Parquet + Snappy, partitioned by event_date",
+          "sql": "SELECT event_type, COUNT(*) AS n, AVG(unit_price) AS avg_price FROM bench_parquet_part GROUP BY event_type ORDER BY n DESC"
+        }
+      }
+    }
+  }
+}
