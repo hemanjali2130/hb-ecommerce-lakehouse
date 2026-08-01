@@ -48,6 +48,12 @@ args = getResolvedOptions(
         "DATA_BUCKET",
         "SOURCE_PREFIX",
         "TARGET_PREFIX",
+        # Must be listed here, not only passed in the job's default_arguments.
+        # getResolvedOptions builds `args` from THIS list; a --FLAG that Terraform
+        # supplies but that is missing here is simply absent, and the first
+        # args["..."] access raises KeyError deep into the run, after the
+        # expensive work has already been done.
+        "QUARANTINE_PREFIX",
         "GLUE_DATABASE",
         "EMIT_FRESHNESS_METRIC",
         "METRIC_NAMESPACE",
@@ -191,21 +197,79 @@ fact_partitions = max(1, min(20, fact_count // 200_000 + 1))
 print(f"[gold] star schema written to {TARGET}")
 
 # ---------------------------------------------------------------------------
-# Register the partitions just written.
+# Register the partitions just written — via the Glue API, not MSCK REPAIR.
 #
-# The Glue tables are declared explicitly in Terraform (no crawler), so nothing
-# discovers new event_date=... directories on its own. Without this, Athena
-# queries a table whose S3 location is full of data and returns zero rows.
+# The obvious approach, spark.sql("MSCK REPAIR TABLE ..."), needs Spark's Hive
+# metastore client, which probes the `default` Glue database at session start and
+# then tries to CREATE it when absent. That would require glue:CreateDatabase on
+# the whole catalog — a far broader grant than partition registration warrants,
+# and one that would let this role create arbitrary databases.
+#
+# Calling BatchCreatePartition directly uses only permissions the Glue role
+# already holds (glue:GetTable, glue:BatchCreatePartition, s3:ListBucket), needs
+# no `default` database, and works whether or not Spark is configured against the
+# catalog. Explicit Glue tables never auto-discover partitions, so without this
+# Athena returns zero rows from a prefix that visibly contains data.
 # ---------------------------------------------------------------------------
-def repair(table):
-    try:
-        spark.sql(f"MSCK REPAIR TABLE `{args['GLUE_DATABASE']}`.`{table}`")
-        n = spark.sql(f"SHOW PARTITIONS `{args['GLUE_DATABASE']}`.`{table}`").count()
-        print(f"[partitions] {table}: {n} registered")
-    except Exception as exc:  # noqa: BLE001
-        print(f"[partitions][WARN] {table}: {exc}")
+def register_partitions(table, s3_prefix, partition_key="event_date"):
+    import boto3
+    from urllib.parse import urlparse
 
-repair("fact_orders")
+    database = args["GLUE_DATABASE"]
+    glue = boto3.client("glue")
+    s3c = boto3.client("s3")
+
+    parsed = urlparse(s3_prefix)
+    bucket, prefix = parsed.netloc, parsed.path.lstrip("/")
+    if prefix and not prefix.endswith("/"):
+        prefix += "/"
+
+    values = set()
+    for page in s3c.get_paginator("list_objects_v2").paginate(
+        Bucket=bucket, Prefix=prefix, Delimiter="/"
+    ):
+        for cp in page.get("CommonPrefixes", []):
+            leaf = cp["Prefix"][len(prefix):].strip("/")
+            if leaf.startswith(partition_key + "="):
+                values.add(leaf.split("=", 1)[1])
+
+    if not values:
+        print(f"[partitions] {table}: no {partition_key}= directories under {s3_prefix}")
+        return
+
+    try:
+        sd = glue.get_table(DatabaseName=database, Name=table)["Table"]["StorageDescriptor"]
+    except Exception as exc:  # noqa: BLE001
+        print(f"[partitions][WARN] {table}: cannot read table definition: {exc}")
+        return
+
+    inputs = []
+    for v in sorted(values):
+        part_sd = dict(sd)
+        part_sd["Location"] = f"s3://{bucket}/{prefix}{partition_key}={v}/"
+        inputs.append({"Values": [v], "StorageDescriptor": part_sd})
+
+    registered = 0
+    for i in range(0, len(inputs), 100):  # BatchCreatePartition caps at 100
+        chunk = inputs[i:i + 100]
+        try:
+            resp = glue.batch_create_partition(
+                DatabaseName=database, TableName=table, PartitionInputList=chunk
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[partitions][WARN] {table}: {exc}")
+            return
+        # AlreadyExists is the expected result on a re-run, not an error.
+        real = [e for e in resp.get("Errors", [])
+                if e.get("ErrorDetail", {}).get("ErrorCode") != "AlreadyExistsException"]
+        if real:
+            print(f"[partitions][WARN] {table}: {real[:3]}")
+        registered += len(chunk)
+
+    print(f"[partitions] {table}: {registered} partitions registered ({sorted(values)})")
+
+
+register_partitions("fact_orders", f"{TARGET}/fact_orders/")
 
 
 # ---------------------------------------------------------------------------

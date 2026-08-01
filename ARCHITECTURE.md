@@ -151,6 +151,21 @@ and reshape a few million rows into a star schema. Both Glue and EMR run Spark.
   a timeout would fire while a job was still queued and the retry would
   double-execute. The timeout lives on the Glue job, whose clock excludes queue
   time.
+
+  **Measured during this build:** Flex saved **$0.09** on the whole workload
+  ($0.18 vs $0.27 for 2,224 DPU-seconds), but one gold run sat in `WAITING` for
+  **over 25 minutes** before capacity freed up, while its actual execution took
+  ~2 minutes. That is the Flex bargain stated plainly: you trade start-time
+  predictability for 34% off compute. For a nightly batch that is free money.
+  For an interactive `make demo-up` it is a poor experience, and a per-run
+  override is the right escape hatch:
+
+  ```bash
+  aws glue start-job-run --job-name hb-gold-job --execution-class STANDARD
+  ```
+
+  This overrides the class for a single run without touching the job definition,
+  so the default stays cheap and the demo path stays fast.
 - Job bookmarks are unavailable on Flex. Acceptable here because each run fully
   overwrites silver and gold.
 

@@ -132,18 +132,11 @@ locals {
     "--DATA_BUCKET"                      = aws_s3_bucket.data.id
     "--GLUE_DATABASE"                    = local.glue_database
 
-    # Makes the Glue Data Catalog Spark's metastore, so each job can register the
-    # partitions it just wrote via MSCK REPAIR TABLE.
-    #
-    # Explicit Glue tables do NOT auto-discover partitions: Spark writes
-    # event_date=YYYY-MM-DD/ directories, but until those are registered the
-    # catalog reports zero partitions and Athena returns zero rows against a
-    # bucket that visibly contains data.
-    #
-    # Registering from inside the writing job (rather than from a Step Functions
-    # Athena task) keeps hb-stepfunctions-role with no S3 and no Athena access at
-    # all, and puts partition registration next to the write that created it.
-    "--enable-glue-datacatalog" = "true"
+    # NOTE: --enable-glue-datacatalog is deliberately NOT set. Pointing Spark's
+    # Hive client at the Glue catalog makes it probe (and then try to CREATE)
+    # the `default` database, which would need glue:CreateDatabase on the whole
+    # catalog. The jobs register partitions with BatchCreatePartition instead,
+    # using only permissions the role already has.
     # Bookmarks are unavailable on Flex jobs, and the pipeline is a full
     # overwrite of silver/gold each run, so there is nothing to bookmark.
     "--job-bookmark-option" = "job-bookmark-disable"
