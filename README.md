@@ -13,11 +13,25 @@ Everything is Terraform. Nothing was clicked into existence in the console.
 
 | | |
 |---|---|
-| **Live dashboard** | _see Deployment below_ |
+| **Live dashboard** | **https://hb-lakehouse-dashboard.vercel.app** |
 | **Architecture + ADRs** | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | **Measured benchmark** | [BENCHMARK.md](BENCHMARK.md) |
 | **IAM design** | [IAM_DESIGN.md](IAM_DESIGN.md) |
 | **Cost model** | [COST_ESTIMATE.md](COST_ESTIMATE.md) |
+| **Resume bullets** | [RESUME_BULLETS.md](RESUME_BULLETS.md) |
+
+## Measured results
+
+| | |
+|---|---|
+| Rows through the pipeline | **6,024,034** |
+| Order lines in `fact_orders` | **1,020,283** across 5,000 customers and 1,493 products |
+| Quarantined | **107,966 of 6,132,000** (1.76%) across 6 rejection reasons, **0** write failures |
+| Late arrivals correctly partitioned by event date | **50,730** |
+| Bytes scanned, raw JSON → Parquet | **1.47 GiB → 6.05 MB (248× less)** |
+| Cost per analytical query | **$0.007163 → $0.000048 (149× less)** |
+| Total build cost (measured) | **$0.21** |
+| Idle cost | **$0.77/month** |
 
 ---
 
@@ -140,9 +154,22 @@ make demo-down   # empty buckets + disable alarms  -> ~$0.00/month, infra intact
 make destroy     # remove everything               -> $0.00/month
 ```
 
-`make destroy` works in one command because every bucket is `force_destroy` and
-the Glue tables are declared in Terraform rather than created by a crawler — a
-crawler-created table is not in state and would survive the destroy.
+`make destroy` is designed to work in one command because every bucket is
+`force_destroy` and the Glue tables are declared in Terraform rather than created
+by a crawler — a crawler-created table is not in state and would survive the
+destroy.
+
+> **Verification status, stated honestly.** `make guard-account` has been run and
+> works. **`make demo-down` and `make destroy` have NOT been executed**, because
+> doing so would tear down the live dashboard this README links to. They are
+> written and reviewed but unverified. Run `make demo-down` first — it is
+> reversible (it empties buckets and disables alarms; `make apply` plus a
+> regeneration restores everything) — before trusting `make destroy`.
+
+> **Do not use `terraform apply -target`.** During this build a targeted apply
+> pruned three resources from state, and the next plan proposed recreating
+> buckets that already existed. Recovered from `terraform.tfstate.backup`. Always
+> run a full apply.
 
 **Verify afterwards:**
 

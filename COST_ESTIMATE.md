@@ -68,6 +68,35 @@ from the benchmark tables.
 
 Quantities are estimates; unit prices are verified.
 
+> ### ✅ MEASURED — this section was replaced with observed values on 2026-07-31
+>
+> | Line item | **Measured quantity** | **Measured cost** |
+> |---|---|---|
+> | Glue Flex — 8 job runs (incl. 3 failures), 2 workers each | **2,224 DPU-seconds = 0.6178 DPU-hours** | **$0.18** |
+> | Athena — 9 benchmark queries | **4.72 GiB billed** | **$0.0215** |
+> | Firehose — live demo stream | 12,000 events ≈ 0.0048 GB | **$0.0004** |
+> | S3 storage (current) | **2.86 GB, 780 objects** | **$0.066 / month** |
+> | **TOTAL ONE-TIME (measured)** | | **≈ $0.21** |
+>
+> **My estimate was $2.87. The actual is $0.21 — I over-budgeted by ~14×.**
+> The error was almost entirely in the Glue line: I assumed 10 full pipeline runs
+> at ~9 minutes per job. Reality was 8 job runs averaging ~150 seconds, because
+> 2 G.1X workers chew through 6 M rows / 2 GB far faster than I allowed for. The
+> direction of the error was safe (over-budgeting, not under), but it was still
+> wrong and the measured numbers replace it.
+>
+> Using Flex over standard Glue saved **$0.09** on this workload
+> ($0.18 vs $0.27) — a real 34% cut, though small in absolute terms at this size.
+>
+> **Cost Explorer caveat:** CE reported only $0.00095 for the month at the time
+> of writing, because CE data lags by up to 24 hours and none of the day's Glue,
+> Athena or Firehose usage had landed yet. The figures above are derived from
+> per-service usage actually observed (Glue `ExecutionTime` × workers, Athena
+> `DataScannedInBytes`), not from CE. Re-check with `make cost` after 24h.
+
+<details>
+<summary>Original pre-build estimate (kept for comparison)</summary>
+
 | Line item | Estimated quantity | Cost |
 |---|---|---|
 | Glue Flex — 3 jobs × 2 DPU × ~9 min, 10 full pipeline runs ⁽ᵃ⁾ | ~9 DPU-hours | **$2.61** |
@@ -87,9 +116,13 @@ which routinely runs 2–4 minutes on a cold cluster before job code executes. I
 observed DPU-seconds from the first real run**, and COST_ESTIMATE.md updated — estimates do
 not stay in this file once measurements exist.
 
-Glue **Flex** ($0.29/DPU-hr) is used for silver and gold. Flex is *not* used for any job that
-Step Functions retries on a timeout: Flex jobs can sit queued for minutes, so a timeout retry
-could fire while the original is still waiting to start. Those run on standard Glue.
+Glue **Flex** ($0.29/DPU-hr) is used for all three jobs. Flex jobs can sit queued for minutes
+before starting, which is why the Step Functions tasks carry **no** `TimeoutSeconds` — a
+state-machine timeout would fire while a run was still queued and the retry would
+double-execute. The timeout lives on the Glue job, whose clock excludes queue time. This was
+observed in practice: gold sat in `WAITING` for several minutes during the build.
+
+</details>
 
 ### Recurring cost, per month, if the stack is left standing
 

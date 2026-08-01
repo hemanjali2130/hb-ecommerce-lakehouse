@@ -106,6 +106,89 @@ safe — the role can rewrite its policy but cannot exceed the boundary.
 
 ---
 
+## The four gaps that only a real end-to-end run exposed
+
+This is the most useful section of this document. Every one of these policies
+passed `terraform validate` **and** `terraform plan`, and three of them survived
+a *successful* first pipeline run. They failed only when the system did something
+slightly different the second time.
+
+### 1. `s3:DeleteObject` on `<prefix>_$folder$`
+
+```
+hb-glue-job-role is not authorized to perform: s3:DeleteObject on
+"arn:aws:s3:::hb-ecom-lakehouse-904233-data/silver_$folder$"
+```
+
+Glue's EMR filesystem writes a zero-byte directory marker named
+`silver_$folder$` — a **sibling** of the `silver/` prefix, not an object inside
+it. So `arn:.../silver/*` does not match it.
+
+**Why it passed the first time and failed the second:** writing into an empty
+prefix deletes nothing. Only `mode("overwrite")` over existing data triggers the
+delete. A first-run-only test would have shipped this bug.
+
+### 2. `glue:GetDatabase` on `database/default`
+
+```
+Unable to verify existence of default database: ... not authorized to perform:
+glue:GetDatabase on .../database/default
+```
+
+Spark's Hive metastore client probes the `default` database when the session
+initialises, regardless of which database the job actually uses. The policy
+scoped Glue to `database/hb_*`.
+
+**This is the most dangerous of the four**, because `MSCK REPAIR TABLE` was
+wrapped in a `try/except` that logged a warning and continued. The job reported
+**SUCCEEDED**. Partitions went unregistered, and Athena returned **zero rows**
+from a prefix visibly containing 2 GB of Parquet. Nothing failed; the data was
+simply invisible. A pipeline that reports success while producing nothing
+queryable is far worse than one that crashes.
+
+### 3. `s3:ListBucket` on the artifacts bucket
+
+```
+LAUNCH ERROR | Error downloading from S3 for bucket: ...-artifacts,
+key: glue/gold_job.py. ... not authorized to perform: s3:ListBucket
+```
+
+Glue's script loader lists the bucket before downloading. `s3:GetObject` on
+`artifacts/*` is not sufficient — the job never starts, so there are no job logs
+to debug from, only the launch error.
+
+### 4. `s3:GetBucketLocation` must be unconditional for the dashboard reader
+
+```
+StartQueryExecution failed: Unable to verify/create output bucket
+hb-ecom-lakehouse-904233-athena-results
+```
+
+`GetBucketLocation` had been folded into the statement carrying the
+`s3:prefix` condition. Athena calls it with **no prefix** while verifying the
+query-results location, so the condition never matched and every dashboard query
+failed. Split into its own unconditional statement; `s3:ListBucket` on the data
+bucket stays prefix-scoped, so bronze, silver and quarantine keys remain
+unenumerable. `GetBucketLocation` discloses nothing but the bucket's region.
+
+### What this says about least privilege
+
+Least-privilege IAM cannot be written correctly from documentation alone. Three
+of these four are **read-back and bootstrap calls** made by AWS services on your
+behalf, which appear in no architecture diagram: a filesystem's directory
+markers, a metastore client's startup probe, a script loader's listing, a query
+engine's output verification. The wildcard that looks obviously right
+(`s3:GetBucket*`) does not cover `s3:GetAccelerateConfiguration`, and S3 mixes
+`PutBucketX` with `PutXConfiguration` inconsistently.
+
+The practical method that worked: **grant, run, read the AccessDenied, tighten**
+— using the real error text, which always names the exact action and resource
+ARN. Step Functions' retry with exponential backoff absorbed two of these
+failures and succeeded on retry once the policy was corrected, which is the
+orchestration layer doing precisely what it was configured for.
+
+---
+
 ## 2. `hb-firehose-role`
 
 **Trusts:** `firehose.amazonaws.com`, with an `sts:ExternalId` condition pinned
