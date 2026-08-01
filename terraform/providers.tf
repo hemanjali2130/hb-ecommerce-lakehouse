@@ -6,9 +6,9 @@ provider "aws" {
   profile = var.aws_profile
 
   # Hard stop if the resolved credentials point at any account other than
-  # Hemanjali's. The Mac's `default` profile authenticates to a DIFFERENT account
-  # (762233768052), so without this guard a forgotten --profile would silently
-  # build the entire lakehouse in the wrong account.
+  # Hemanjali's. The build machine also carries a `default` profile for a
+  # different, unrelated AWS account, so without this guard a forgotten
+  # --profile would silently build the entire lakehouse in the wrong account.
   allowed_account_ids = [var.aws_account_id]
 
   default_tags {

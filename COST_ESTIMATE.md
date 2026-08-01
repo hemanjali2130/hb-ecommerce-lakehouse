@@ -1,7 +1,7 @@
 # Cost estimate — no free tier assumed
 
 Project: **hb-ecommerce-lakehouse** · Owner: **Hemanjali Buchireddy**
-Account 762233768052 · us-east-1 · priced 2026-07-31
+Account 904233128322 · us-east-1 · priced 2026-07-31
 
 **Every unit price below was pulled from the AWS Pricing API on this machine today.**
 None are from memory. The *quantities* are my engineering estimates and are labelled as such.

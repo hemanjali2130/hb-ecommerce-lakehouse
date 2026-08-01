@@ -37,16 +37,9 @@ Everything is Terraform. Nothing was clicked into existence in the console.
 
 ## Screenshots
 
-<!-- SCREENSHOT PLACEHOLDER -->
-| | |
-|---|---|
-| **Dashboard overview** | `docs/screenshots/dashboard-overview.png` |
-| **Quarantine by rejection reason** | `docs/screenshots/quarantine-breakdown.png` |
-| **Step Functions execution graph** | `docs/screenshots/stepfunctions-run.png` |
-| **Athena benchmark comparison** | `docs/screenshots/benchmark-athena.png` |
-| **Cost Explorer — actual spend** | `docs/screenshots/cost-explorer.png` |
+![Dashboard overview — live Athena-backed stat tiles, freshness, pipeline status](docs/screenshots/dashboard-overview.jpg)
 
-_Drop PNGs at those paths and they render here._
+![Quarantine breakdown by rejection reason](docs/screenshots/quarantine-breakdown.jpg)
 
 ---
 
